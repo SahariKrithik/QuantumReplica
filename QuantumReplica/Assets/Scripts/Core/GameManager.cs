@@ -14,7 +14,6 @@ public class GameManager : MonoBehaviour
     public TMP_Text multiplierText;
     public TMP_Text resultText;
     public TMP_Text currencyDisplayText;
-    public TextMeshProUGUI overUnderLabel;
     public Button placeBetButton;
     public TMP_Text betValidationMessage;
 
@@ -32,52 +31,55 @@ public class GameManager : MonoBehaviour
     private int playerBalance = 1000;
     private int vrfResult;
 
+    void Awake()
+    {
+        betInputField.contentType = TMP_InputField.ContentType.IntegerNumber;
+        betInputField.lineType = TMP_InputField.LineType.SingleLine;
+        betInputField.readOnly = false;
+    }
+
     private void Start()
     {
+        betValidationMessage.gameObject.SetActive(false);
         UpdateCurrencyUI();
-
-        // Optional failsafe to reset Viewport position
         historyScrollRect.viewport.localPosition = Vector3.zero;
 
         betSlider.onValueChanged.AddListener(delegate {
             UpdateChanceAndMultiplier();
+           
             ValidateBetEligibility();
+
         });
 
         gameModeDropdown.onValueChanged.AddListener(OnGameModeChanged);
         betInputField.onValueChanged.AddListener(delegate { ValidateBetEligibility(); });
 
-        betInputField.onSubmit.AddListener(delegate {
-            if (placeBetButton.interactable)
-            {
-                OnPlaceBetButton();
-            }
-        });
+        // Show overlay input field on mobile when focused
+        betInputField.onSelect.AddListener(delegate { ShowMobileOverlay(betInputField.text); });
 
-        OnGameModeChanged(gameModeDropdown.value); // Initialize
+        OnGameModeChanged(gameModeDropdown.value);
         resultText.gameObject.SetActive(false);
-
-        // Disable layout recalculations after initial setup
-        StartCoroutine(DisableContentSizeFitter());
     }
 
-    private IEnumerator DisableContentSizeFitter()
+    public void ReceiveInputFromOverlay(string value)
     {
-        yield return new WaitForEndOfFrame();
-        contentSizeFitter.enabled = false;
+        betInputField.text = value;
+        ValidateBetEligibility();
+    }
+
+    private void ShowMobileOverlay(string currentValue)
+    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        Application.ExternalCall("showMobileKeyboard", currentValue);
+#endif
     }
 
     void OnGameModeChanged(int index)
     {
         currentMode = (index == 0) ? GameMode.RollUnder : GameMode.RollOver;
-
         betSlider.minValue = 1;
         betSlider.maxValue = 99;
         betSlider.value = 50;
-
-        overUnderLabel.text = currentMode == GameMode.RollUnder
-            ? "Mode: Roll Under"
-            : "Mode: Roll Over";
 
         UpdateChanceAndMultiplier();
         ValidateBetEligibility();
@@ -121,22 +123,15 @@ public class GameManager : MonoBehaviour
             playerBalance -= betAmount;
         }
 
-        // Reuse or create entry
         GameObject entry = GetPooledEntry();
         entry.transform.SetParent(historyContentParent, false);
-
-        RectTransform entryRect = entry.GetComponent<RectTransform>();
-        entryRect.anchorMin = new Vector2(0, entryRect.anchorMin.y);
-        entryRect.anchorMax = new Vector2(1, entryRect.anchorMax.y);
-        entryRect.offsetMin = new Vector2(0, entryRect.offsetMin.y);
-        entryRect.offsetMax = new Vector2(0, entryRect.offsetMax.y);
-        entryRect.anchoredPosition = new Vector2(0, entryRect.anchoredPosition.y);
 
         TMP_Text entryText = entry.GetComponent<TMP_Text>();
         entryText.text = $"Bet: {betAmount} | Result: {vrfResult} | {(isWin ? "WIN" : "LOSS")}";
         entryText.color = isWin ? new Color(0.2f, 1f, 0.2f) : new Color(1f, 0.3f, 0.3f);
 
-        // Limit total visible entries
+        LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)historyContentParent);
+
         if (historyContentParent.childCount > maxHistoryEntries)
         {
             Transform oldest = historyContentParent.GetChild(0);
@@ -149,6 +144,8 @@ public class GameManager : MonoBehaviour
         UpdateCurrencyUI();
         ValidateBetEligibility();
     }
+
+
 
     private GameObject GetPooledEntry()
     {

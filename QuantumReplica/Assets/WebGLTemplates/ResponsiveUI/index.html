@@ -1,80 +1,167 @@
 ﻿<!DOCTYPE html>
-<html lang="en">
+<html lang="en-us">
 <head>
   <meta charset="utf-8">
-  <title>Quantum WebGL</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>{{{ PRODUCT_NAME }}} | WebGL</title>
   <style>
     html, body {
       margin: 0;
       padding: 0;
+      background: #111;
       height: 100%;
-      background: #000000;
+      width: 100%;
       overflow: hidden;
     }
 
     #unity-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       width: 100vw;
       height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background-color: #1d1b3a; /* optional background override */
+      box-sizing: border-box;
+      padding: 1rem;
     }
 
     canvas#unity-canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-      background: #1d1b3a;
+      height: 95vh;
+      width: auto;
+      max-height: 95vh;
+      aspect-ratio: 9 / 16;
+      background: #000;
+      box-shadow: 0 0 16px rgba(0,0,0,0.25);
+      margin: 2.5vh 0;
     }
 
     #unity-loading-bar {
-      display: none;
-    }
-
-    #unity-warning {
       position: absolute;
       top: 10px;
-      left: 10px;
-      background: #ffa;
-      padding: 10px;
-      display: none;
-      z-index: 999;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+
+    #unity-footer {
+      margin-top: 1rem;
+      text-align: center;
+      color: white;
+    }
+
+    input#mobileInputOverlay {
+      position: absolute;
+      top: -100px;
+      opacity: 0;
+      pointer-events: none;
     }
   </style>
 </head>
+
 <body>
   <div id="unity-container">
     <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+    </div>
+    <div id="unity-warning"></div>
+    <div id="unity-footer">
+      <div id="unity-webgl-logo"></div>
+      <div id="unity-fullscreen-button"></div>
+      <div id="unity-build-title">{{{ PRODUCT_NAME }}}</div>
+    </div>
   </div>
-  <div id="unity-warning">Your browser does not support WebGL</div>
+
+  <input id="mobileInputOverlay" type="number" inputmode="numeric" pattern="[0-9]*" oninput="sendToUnity(this.value)" />
 
   <script>
-    var buildUrl = "Build";
-    var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
-    var config = {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        for (const reg of registrations) {
+          reg.unregister();
+        }
+      });
+    }
+
+    const container = document.querySelector("#unity-container");
+    const canvas = document.querySelector("#unity-canvas");
+    const loadingBar = document.querySelector("#unity-loading-bar");
+    const progressBarFull = document.querySelector("#unity-progress-bar-full");
+    const fullscreenButton = document.querySelector("#unity-fullscreen-button");
+    const warningBanner = document.querySelector("#unity-warning");
+
+    let unityInstance = null;
+
+    function unityShowBanner(msg, type) {
+      function updateBannerVisibility() {
+        warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+      }
+      const div = document.createElement('div');
+      div.innerHTML = msg;
+      warningBanner.appendChild(div);
+      if (type === 'error') div.style = 'background: red; padding: 10px;';
+      else {
+        if (type === 'warning') div.style = 'background: yellow; padding: 10px;';
+        setTimeout(() => {
+          warningBanner.removeChild(div);
+          updateBannerVisibility();
+        }, 5000);
+      }
+      updateBannerVisibility();
+    }
+
+    function showMobileKeyboard(currentValue) {
+      const input = document.getElementById("mobileInputOverlay");
+      input.value = currentValue || "";
+      input.style.top = "50%";
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+
+    // ✅ Make showMobileKeyboard callable from Unity
+    window.showMobileKeyboard = showMobileKeyboard;
+
+    function sendToUnity(value) {
+      if (unityInstance) {
+        unityInstance.SendMessage("GameManager", "ReceiveInputFromOverlay", value);
+      }
+    }
+
+    const buildUrl = "Build";
+    const loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+
+    const config = {
       dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
       frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
       codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
       streamingAssetsUrl: "StreamingAssets",
       companyName: "{{{ COMPANY_NAME }}}",
       productName: "{{{ PRODUCT_NAME }}}",
-      productVersion: "{{{ PRODUCT_VERSION }}}"
+      productVersion: "{{{ PRODUCT_VERSION }}}",
+      showBanner: unityShowBanner
     };
 
-    var container = document.querySelector("#unity-container");
-    var canvas = document.querySelector("#unity-canvas");
-    var warningBanner = document.querySelector("#unity-warning");
+    loadingBar.style.display = "block";
 
-    createUnityInstance(canvas, config, (progress) => {
-      // Optionally show loading bar here
-    }).then((unityInstance) => {
-      window.unityInstance = unityInstance;
-    }).catch((message) => {
-      warningBanner.style.display = "block";
-      warningBanner.textContent = message;
-    });
+    const script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = () => {
+      createUnityInstance(canvas, config, (progress) => {
+        progressBarFull.style.width = 100 * progress + "%";
+      }).then((instance) => {
+        unityInstance = instance;
+        loadingBar.style.display = "none";
+        fullscreenButton.onclick = () => {
+          instance.SetFullscreen(1);
+        };
+      }).catch((message) => {
+        alert(message);
+      });
+    };
+    document.body.appendChild(script);
   </script>
 </body>
 </html>
